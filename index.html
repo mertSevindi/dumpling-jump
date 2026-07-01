@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Dumpling Jump</title>
+    <style>
+        body { margin: 0; display: flex; flex-direction: column; align-items: center; background-color: #87CEEB; font-family: sans-serif; }
+        #ui { display: flex; justify-content: space-between; width: 800px; padding: 10px; font-size: 20px; font-weight: bold; }
+        canvas { background-color: #f0f8ff; border: 4px solid #333; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 5px; border: none; background: #ff6b6b; color: white; }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div>Lives: <span id="lives">100</span></div>
+        <div>Level: <span id="level">1</span></div>
+        <button onclick="resetGame()">Restart Level</button>
+    </div>
+    
+    <canvas id="gameCanvas" width="800" height="500"></canvas>
+
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Görseller
+    const dumpyImg = new Image();
+    dumpyImg.src = "dumpling.webp"; // Şeffaf dumpling görseliniz
+    const potImg = new Image();
+    potImg.src = "tencere.webp"; // Tencere görseliniz
+
+    // Oyun Değişkenleri
+    const MAX_LIVES = 5;
+    const POT_SIZE = 100;
+    let level = 1;
+    let lives = MAX_LIVES;
+    const gravity = 0.5;
+    let isCharging = false;
+    let chargePower = 0;
+
+    // Karakter (Dumpy)
+    let dumpy = {
+        x: 50, y: 400, width: 60, height: 60,
+        vx: 0, vy: 0, isGrounded: true,
+        jumpStartX: 50, jumpStartY: 400
+    };
+
+    // Hedef (Tencere)
+    let pot = {
+        x: 700, y: 40, width: 100, height: 100,
+        startX: 700,
+        angle: 0,
+        speed: 0.03,
+        amplitude: 20,
+        isOpen: true
+    };
+    const potPositions = [
+        { x: 700, y: 40 },
+        { x: 620, y: 50 },
+        { x: 680, y: 30 },
+        { x: 560, y: 60 },
+        { x: 720, y: 55 }
+    ];
+
+    // Platform (Seviye 3 için)
+    let platform = { active: false, x: 350, y: 300, width: 100, height: 20 };
+
+    // Dumpling'in üzerindeki küçük kutuk
+    let stand = { x: 130, y: 360, width: 100, height: 20, color: "#A0522D", active: false };
+
+    function updateUI() {
+        document.getElementById("level").innerText = level;
+        document.getElementById("lives").innerText = lives;
+    }
+
+    function setPotSize(size) {
+        pot.width = size;
+        pot.height = size;
+    }
+
+    function setPotPosition(pos) {
+        pot.startX = pos.x;
+        pot.x = pos.x;
+        pot.y = pos.y;
+        pot.angle = 0;
+    }
+
+    function resetPot() {
+        setPotPosition(potPositions[0]);
+        setPotSize(POT_SIZE);
+        pot.isOpen = true;
+    }
+
+    // Fare/Dokunma Kontrolleri
+    canvas.addEventListener("mousedown", () => {
+        if (dumpy.isGrounded) { isCharging = true; chargePower = 0; }
+    });
+
+    canvas.addEventListener("mouseup", () => {
+        if (isCharging) {
+            isCharging = false;
+            const power = chargePower * 0.4;
+            dumpy.vx = power;
+            dumpy.vy = -power;
+            dumpy.isGrounded = false;
+            if (level >= 3) {
+                dumpy.jumpStartX = dumpy.x;
+                dumpy.jumpStartY = dumpy.y;
+            }
+        }
+    });
+
+    function update() {
+        // Güç toplama
+        if (isCharging && chargePower < 50) chargePower += 1;
+
+        // Fizik (Yerçekimi ve Hareket)
+        if (!dumpy.isGrounded) {
+            dumpy.vy += gravity;
+            dumpy.x += dumpy.vx;
+            dumpy.y += dumpy.vy;
+
+            if (level >= 3) {
+                const dx = dumpy.x - dumpy.jumpStartX;
+                if (dx > 400) {
+                    dumpy.x = dumpy.jumpStartX + 400;
+                    dumpy.vx = 0;
+                }
+                if (dx < -400) {
+                    dumpy.x = dumpy.jumpStartX - 400;
+                    dumpy.vx = 0;
+                }
+                if (dumpy.y < dumpy.jumpStartY - 400) {
+                    dumpy.y = dumpy.jumpStartY - 400;
+                    dumpy.vy = 0;
+                }
+            }
+        }
+
+        // Stand çarpışma kontrolleri
+        if (stand.active && dumpy.vy >= 0 &&
+            dumpy.x + dumpy.width > stand.x && dumpy.x < stand.x + stand.width &&
+            dumpy.y + dumpy.height >= stand.y && dumpy.y + dumpy.height <= stand.y + 15) {
+            dumpy.isGrounded = true;
+            dumpy.vy = 0;
+            dumpy.vx = 0;
+            dumpy.y = stand.y - dumpy.height;
+        } else {
+            // Denize düşme kontrolü
+            if (dumpy.y + dumpy.height >= canvas.height && !dumpy.isGrounded) {
+                loseLife();
+            } else if (dumpy.y + dumpy.height >= canvas.height) {
+                dumpy.y = canvas.height - dumpy.height;
+                dumpy.vx = 0;
+                dumpy.vy = 0;
+                if (!dumpy.isGrounded) loseLife(); // Yere düştüğünde can gider
+            }
+        }
+
+        // Ekran dışına çıkma kontrolü
+        if (dumpy.x > canvas.width || dumpy.x < 0) loseLife();
+
+        // Platform Çarpışması (Sadece üstüne düşerse)
+        if (platform.active && dumpy.vy > 0 && 
+            dumpy.x + dumpy.width > platform.x && dumpy.x < platform.x + platform.width &&
+            dumpy.y + dumpy.height >= platform.y && dumpy.y + dumpy.height <= platform.y + 15) {
+            dumpy.isGrounded = true;
+            dumpy.vy = 0;
+            dumpy.vx = 0;
+            dumpy.y = platform.y - dumpy.height;
+        }
+
+        // Tencere Hareketi (Seviye 4 itibariyle sağ üstte ince salınım)
+        if (level >= 4) {
+            pot.angle += pot.speed;
+            pot.x = pot.startX + Math.sin(pot.angle) * pot.amplitude;
+        }
+
+        checkCollision();
+    }
+
+    function checkCollision() {
+        // Basit AABB (Kutu) Çarpışma Testi
+        if (dumpy.x < pot.x + pot.width &&
+            dumpy.x + dumpy.width > pot.x &&
+            dumpy.y < pot.y + pot.height &&
+            dumpy.y + dumpy.height > pot.y) {
+            
+            if (pot.isOpen) {
+                levelUp();
+            } else {
+                // Kapak kapalıysa sekme efekti
+                dumpy.vx *= -1; 
+            }
+        }
+    }
+
+    function loseLife() {
+        lives = Math.max(0, lives - 1);
+        updateUI();
+        if (lives <= 0) {
+            alert("Oyun Over! Restarting...");
+            resetGame();
+        } else {
+            resetPosition();
+        }
+    }
+
+    function levelUp() {
+        level++;
+        document.getElementById("level").innerText = level;
+        resetPosition();
+
+        // Zorluk ayarlamaları
+        if (level === 2) {
+            // Top-right pot remains fixed.
+        }
+        if (level === 3) {
+            platform.active = true;
+        }
+        if (level === 4) {
+            setPotPosition(potPositions[0]);
+            setPotSize(POT_SIZE);
+        }
+        if (level > 4) {
+            setPotPosition(potPositions[(level - 4) % potPositions.length]);
+            setPotSize(POT_SIZE);
+        }
+    }
+
+    function resetPosition() {
+        dumpy.x = 150;
+        dumpy.y = stand.y - dumpy.height;
+        dumpy.vx = 0;
+        dumpy.vy = 0;
+        dumpy.isGrounded = true;
+        isCharging = false;
+        chargePower = 0;
+    }
+
+    function resetGame() {
+        level = 1;
+        lives = MAX_LIVES;
+        updateUI();
+        platform.active = false;
+        pot.moveSpeed = 0;
+        resetPot();
+        resetPosition();
+    }
+
+    function drawWaves() {
+        // Sky background
+        ctx.fillStyle = "#87CEEB";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Wave layers
+        const waveColors = ["#a0d8f1", "#74c0e5", "#3b99d6", "#1f78c1"];
+        const waveHeights = [360, 380, 400, 420];
+        waveColors.forEach((color, index) => {
+            const y = waveHeights[index];
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.bezierCurveTo(200, y - 40, 300, y + 40, 400, y);
+            ctx.bezierCurveTo(500, y - 40, 600, y + 40, 800, y);
+            ctx.lineTo(800, canvas.height);
+            ctx.lineTo(0, canvas.height);
+            ctx.closePath();
+            ctx.fill();
+        });
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawWaves();
+
+        // Dumpling'in üzerinde duran küçük kutuk
+        if (stand.active) {
+            ctx.fillStyle = stand.color;
+            ctx.fillRect(stand.x, stand.y, stand.width, stand.height);
+        }
+
+        // Platform çizimi
+        if (platform.active) {
+            ctx.fillStyle = "#8B4513";
+            ctx.fillRect(platform.x, platform.y, platform.width, platform.height);
+        }
+
+        // Tencere çizimi (Görsel yoksa yedek dikdörtgen çizer)
+        if (potImg.complete && potImg.naturalHeight !== 0) {
+            ctx.drawImage(potImg, pot.x, pot.y, pot.width, pot.height);
+        } else {
+            ctx.fillStyle = "black";
+            ctx.fillRect(pot.x, pot.y, pot.width, pot.height);
+        }
+
+        // Dumpy çizimi
+        if (dumpyImg.complete && dumpyImg.naturalHeight !== 0) {
+            ctx.drawImage(dumpyImg, dumpy.x, dumpy.y, dumpy.width, dumpy.height);
+        } else {
+            ctx.fillStyle = "green";
+            ctx.beginPath();
+            ctx.arc(dumpy.x + dumpy.width/2, dumpy.y + dumpy.height/2, dumpy.width/2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Güç Barı Çizimi
+        if (isCharging) {
+            const barX = dumpy.x;
+            const barY = dumpy.y - 24;
+            const barWidth = Math.min(chargePower * 3, 150);
+            const barHeight = 12;
+            const radius = 6;
+
+            // Background track
+            ctx.fillStyle = "rgba(255,255,255,0.7)";
+            ctx.strokeStyle = "rgba(0,0,0,0.15)";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(barX + radius, barY);
+            ctx.lineTo(barX + barWidth - radius, barY);
+            ctx.quadraticCurveTo(barX + barWidth, barY, barX + barWidth, barY + radius);
+            ctx.lineTo(barX + barWidth, barY + barHeight - radius);
+            ctx.quadraticCurveTo(barX + barWidth, barY + barHeight, barX + barWidth - radius, barY + barHeight);
+            ctx.lineTo(barX + radius, barY + barHeight);
+            ctx.quadraticCurveTo(barX, barY + barHeight, barX, barY + barHeight - radius);
+            ctx.lineTo(barX, barY + radius);
+            ctx.quadraticCurveTo(barX, barY, barX + radius, barY);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Gradient fill
+            const gradient = ctx.createLinearGradient(barX, barY, barX + barWidth, barY);
+            gradient.addColorStop(0, "#ff5f6d");
+            gradient.addColorStop(0.5, "#ff9a5c");
+            gradient.addColorStop(1, "#ffd36e");
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.moveTo(barX + radius, barY);
+            ctx.lineTo(barX + barWidth - radius, barY);
+            ctx.quadraticCurveTo(barX + barWidth, barY, barX + barWidth, barY + radius);
+            ctx.lineTo(barX + barWidth, barY + barHeight - radius);
+            ctx.quadraticCurveTo(barX + barWidth, barY + barHeight, barX + barWidth - radius, barY + barHeight);
+            ctx.lineTo(barX + radius, barY + barHeight);
+            ctx.quadraticCurveTo(barX, barY + barHeight, barX, barY + barHeight - radius);
+            ctx.lineTo(barX, barY + radius);
+            ctx.quadraticCurveTo(barX, barY, barX + radius, barY);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        requestAnimationFrame(gameLoop);
+    }
+
+    function gameLoop() {
+        update();
+        draw();
+    }
+
+    // Oyunu Başlat
+    dumpyImg.onload = resetPosition;
+    gameLoop();
+</script>
+</body>
+</html>
